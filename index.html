@@ -460,14 +460,15 @@ function fitSize(w, h, maxW, maxH) {
   const r = Math.min(maxW / w, maxH / h);
   return { width: Math.max(1, Math.round(w * r)), height: Math.max(1, Math.round(h * r)) };
 }
-function paragraphLines(text, TextRun, Paragraph) {
+function paragraphLines(text, TextRun, Paragraph, opt={}) {
+  const { align, keepNext, ...runOpt } = opt;
   const lines = String(text || "").split("\n");
   const runs = [];
   lines.forEach((line, i) => {
     if (i) runs.push(new TextRun({ break: 1 }));
-    runs.push(new TextRun(line));
+    runs.push(new TextRun({ text: line, font: "Arial", size: 20, ...runOpt }));
   });
-  return new Paragraph({ children: runs });
+  return new Paragraph({ alignment: align, keepNext, children: runs });
 }
 
 async function stampImage(file, formDate) {
@@ -574,53 +575,78 @@ async function generate() {
     if (typeof docx === "undefined" || typeof saveAs !== "function") {
       throw new Error("未能載入 Word 函式庫，請檢查網絡後再試");
     }
-    const { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun, ImageRun, WidthType, PageBreak, BorderStyle, VerticalAlign } = docx;
+    const { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun, ImageRun, WidthType, PageBreak, BorderStyle, VerticalAlign, AlignmentType, TableLayoutType } = docx;
     const thin = { style: BorderStyle.SINGLE, size: 4, color: "000000" };
     const borders = { top: thin, bottom: thin, left: thin, right: thin };
-    const cell = (children, opts={}) => new TableCell({ borders, margins: { top: 40, bottom: 40, left: 40, right: 40 }, verticalAlign: VerticalAlign.CENTER, ...opts, children });
-    const pText = (t, opt={}) => new Paragraph({ children: [new TextRun({ text: t, font: "Arial", size: 20, ...opt })] });
+    const noBorder = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
+    const noBorders = { top: noBorder, bottom: noBorder, left: noBorder, right: noBorder };
+    const CM = 567; // twips per cm
+    const PAGE_W = 16 * CM; // 16 cm content width
+    const cell = (children, opts={}) => {
+      const { width, margins, ...rest } = opts;
+      return new TableCell({
+        borders,
+        margins: margins || { top: 40, bottom: 40, left: 40, right: 40 },
+        verticalAlign: VerticalAlign.CENTER,
+        ...(width != null ? { width: { size: width, type: WidthType.DXA } } : {}),
+        ...rest,
+        children
+      });
+    };
+    const pText = (t, opt={}) => {
+      const { align, keepNext, ...runOpt } = opt;
+      return new Paragraph({
+        alignment: align,
+        keepNext,
+        children: [new TextRun({ text: t, font: "Arial", size: 20, ...runOpt })]
+      });
+    };
+    const makeTable = (colWidths, rows) => new Table({
+      width: { size: colWidths.reduce((a, b) => a + b, 0), type: WidthType.DXA },
+      columnWidths: colWidths,
+      layout: TableLayoutType.FIXED,
+      rows
+    });
+    const row = (cells) => new TableRow({ cantSplit: true, children: cells });
 
     const children = [];
-    const headerRows = [
-      [pText("Audit Report on Routine Maintenance / Completion Report", { bold: true, size: 24 }), null, null, null],
-      [pText("From:"), pText(fromCo), pText("To:"), pText(toCo)],
-      [paragraphLines("Inspection\nOfficer:", TextRun, Paragraph), pText(officer), pText("cc:"), pText(cc)],
-      [pText("Email:"), pText(email), pText("Email:"), pText(toEmail)],
-      [pText("Date:"), pText(date), paragraphLines("Estate/\nDistrict:", TextRun, Paragraph), pText(estate)]
-    ];
-    children.push(new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
-      rows: headerRows.map((r, i) => new TableRow({
-        children: i === 0
-          ? [cell([r[0]], { columnSpan: 4 })]
-          : r.map(c => cell([c]))
-      }))
-    }));
+    const HW = [Math.round(2.8 * CM), Math.round(5.2 * CM), Math.round(2.8 * CM), Math.round(5.2 * CM)];
+    const title = pText("Audit Report on Routine Maintenance / Completion Report", { bold: true, size: 24, align: AlignmentType.CENTER });
+    children.push(makeTable(HW, [
+      row([cell([title], { columnSpan: 4, width: PAGE_W })]),
+      row([cell([pText("From:")], { width: HW[0] }), cell([pText(fromCo)], { width: HW[1] }), cell([pText("To:")], { width: HW[2] }), cell([pText(toCo)], { width: HW[3] })]),
+      row([cell([paragraphLines("Inspection\nOfficer:", TextRun, Paragraph)], { width: HW[0] }), cell([pText(officer)], { width: HW[1] }), cell([pText("cc:")], { width: HW[2] }), cell([pText(cc)], { width: HW[3] })]),
+      row([cell([pText("Email:")], { width: HW[0] }), cell([pText(email)], { width: HW[1] }), cell([pText("Email:")], { width: HW[2] }), cell([pText(toEmail)], { width: HW[3] })]),
+      row([cell([pText("Date:")], { width: HW[0] }), cell([pText(date)], { width: HW[1] }), cell([paragraphLines("Estate/\nDistrict:", TextRun, Paragraph)], { width: HW[2] }), cell([pText(estate)], { width: HW[3] })])
+    ]));
     children.push(new Paragraph({ text: "" }));
 
+    const IW = [4 * CM, 12 * CM];
     const findings = order.map(k => k + "_" + (groups[k].finding || "")).join("\n") || NO_FINDING_TEXT;
-    children.push(new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
-      rows: [
-        new TableRow({ children: [cell([paragraphLines("Referral\nCase No.", TextRun, Paragraph)]), cell([pText(caseNo || "N/A")])] }),
-        new TableRow({ children: [cell([pText("Location:", { bold: true })]), cell([pText(loc)])] }),
-        new TableRow({ children: [cell([pText("Findings:", { bold: true })]), cell([paragraphLines(findings, TextRun, Paragraph)])] })
-      ]
-    }));
+    children.push(makeTable(IW, [
+      row([cell([paragraphLines("Referral\nCase No.", TextRun, Paragraph, { bold: true })], { width: IW[0] }), cell([pText(caseNo || "N/A")], { width: IW[1] })]),
+      row([cell([pText("Location:", { bold: true })], { width: IW[0] }), cell([pText(loc)], { width: IW[1] })]),
+      row([cell([pText("Findings:", { bold: true })], { width: IW[0] }), cell([paragraphLines(findings, TextRun, Paragraph)], { width: IW[1] })])
+    ]));
     children.push(new Paragraph({ text: "" }));
 
     const MAX_W = 250, MAX_H = 333;
+    const PHW = [8 * CM, 8 * CM];
     const addPair = async (left, right) => {
-      const makeImgCell = async (item) => {
-        if (!item) return cell([new Paragraph("")], { borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } } });
+      const makeImgCell = async (item, width) => {
+        if (!item) return cell([new Paragraph("")], { borders: noBorders, width, margins: { top: 60, bottom: 60, left: 60, right: 60 } });
         const buf = await item.photo.blob.arrayBuffer();
         const size = fitSize(item.photo.width, item.photo.height, MAX_W, MAX_H);
-        return cell([new Paragraph({ alignment: "center", children: [new ImageRun({ data: buf, transformation: size })] })]);
+        return cell([
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [new ImageRun({ type: "jpg", data: buf, transformation: size })]
+          })
+        ], { width, margins: { top: 60, bottom: 60, left: 60, right: 60 } });
       };
-      children.push(new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        rows: [new TableRow({ children: [await makeImgCell(left), await makeImgCell(right)] })]
-      }));
+      children.push(makeTable(PHW, [
+        row([await makeImgCell(left, PHW[0]), await makeImgCell(right, PHW[1])])
+      ]));
     };
 
     let treesOnPage = 0, prevPhotos = 0;
@@ -640,43 +666,57 @@ async function generate() {
         treesOnPage += 1;
         prevPhotos = nPhotos;
       }
-      children.push(new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        rows: [new TableRow({ children: [cell([pText("Photos – " + id + "_" + (g.finding || ""), { bold: true })])] })]
-      }));
+      children.push(makeTable([PAGE_W], [
+        row([cell([pText("Photos – " + id + "_" + (g.finding || ""), { bold: true, size: 22, keepNext: true })], { width: PAGE_W })])
+      ]));
       for (let j = 0; j < g.photos.length; j += 2) {
         await addPair(g.photos[j], g.photos[j + 1] || null);
       }
+      children.push(new Paragraph({ spacing: { before: 200, after: 200 } }));
     }
 
     let sigRun = pText("");
     let sigBuf = null;
+    let sigType = "png";
     if (override) {
       sigBuf = await override.arrayBuffer();
+      const ttype = (override.type || "").toLowerCase();
+      if (ttype.includes("jpeg") || ttype.includes("jpg")) sigType = "jpg";
+      else if (ttype.includes("gif")) sigType = "gif";
+      else if (ttype.includes("bmp")) sigType = "bmp";
+      else sigType = "png";
     } else {
       const key = sigKeyFor(officer);
       if (key && SIGS[key]) {
         const res = await fetch(SIGS[key]);
         sigBuf = await res.arrayBuffer();
+        sigType = "png";
       }
     }
     if (sigBuf) {
-      sigRun = new Paragraph({ children: [new ImageRun({ data: sigBuf, transformation: { width: 173, height: 72 } })] });
+      let sigW = 173, sigH = 83;
+      try {
+        const bmp = await createImageBitmap(new Blob([sigBuf]));
+        const fitted = fitSize(bmp.width, bmp.height, 173, 90);
+        sigW = fitted.width;
+        sigH = fitted.height;
+        if (bmp.close) bmp.close();
+      } catch (e) {}
+      sigRun = new Paragraph({ children: [new ImageRun({ type: sigType, data: sigBuf, transformation: { width: sigW, height: sigH } })] });
     } else {
       sigRun = pText("(signed)");
     }
     children.push(new Paragraph({ text: "" }));
-    children.push(new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
-      rows: [
-        new TableRow({ children: [cell([pText("Audited by:", { bold: true })]), cell([pText(officerShortName(officer))])] }),
-        new TableRow({ children: [cell([pText("Signature:", { bold: true })]), cell([sigRun])] }),
-        new TableRow({ children: [cell([pText("AS Contractor:", { bold: true })]), cell([pText(fromCo)])] }),
-        new TableRow({ children: [cell([pText("Contract No.:", { bold: true })]), cell([pText(contract)])] })
-      ]
-    }));
+    const FW = [4 * CM, 12 * CM];
+    children.push(makeTable(FW, [
+      row([cell([pText("Audited by:", { bold: true })], { width: FW[0] }), cell([pText(officerShortName(officer))], { width: FW[1] })]),
+      row([cell([pText("Signature:", { bold: true })], { width: FW[0] }), cell([sigRun], { width: FW[1] })]),
+      row([cell([pText("AS Contractor:", { bold: true })], { width: FW[0] }), cell([pText(fromCo)], { width: FW[1] })]),
+      row([cell([pText("Contract No.:", { bold: true })], { width: FW[0] }), cell([pText(contract)], { width: FW[1] })])
+    ]));
 
     const doc = new Document({
+      styles: { default: { document: { run: { font: "Arial", size: 22 } } } },
       sections: [{
         properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 1134, bottom: 1134, left: 1418, right: 1418 } } },
         children
