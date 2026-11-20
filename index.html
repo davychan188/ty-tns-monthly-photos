@@ -289,6 +289,14 @@ function parseTreeFilename(filename) {
   return null;
 }
 
+function treeNumber(id) {
+  const m = String(id).match(/(\d+)\s*$/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+function compareTreeIds(a, b) {
+  return treeNumber(a) - treeNumber(b) || String(a).toUpperCase().localeCompare(String(b).toUpperCase());
+}
+
 function detectEstateFromFiles(list) {
   for (const f of list) {
     const p = parseTreeFilename(f.name);
@@ -556,6 +564,7 @@ async function generate() {
       groups[p.id].photos.push({ idx: p.idx, name: f.name, photo });
     }
     if (!order.length) throw new Error("沒有可辨識檔名的相片，無法產生報告");
+    order.sort(compareTreeIds);
     order.forEach(id => groups[id].photos.sort((a, b) => a.idx - b.idx || a.name.localeCompare(b.name)));
 
     const code = detectEstateFromFiles(files) || estateSel.value;
