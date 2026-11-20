@@ -4,8 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TY_TNS Monthly Photos</title>
-<script src="https://unpkg.com/docx@8.5.0/build/index.js"></script>
-<script src="https://unpkg.com/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+<script>
+if (typeof docx === "undefined") {
+  document.write('<script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"><\/script>');
+}
+if (typeof saveAs === "undefined") {
+  document.write('<script src="https://unpkg.com/file-saver@2.0.5/dist/FileSaver.min.js"><\/script>');
+}
+</script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: "Segoe UI", Arial, sans-serif; background: #f0f4f8; color: #222; }
@@ -563,6 +571,9 @@ async function generate() {
     const estate = (est.dataset.eng || "") + " / " + (est.dataset.dist || "");
     const contract = document.getElementById("contract").value;
 
+    if (typeof docx === "undefined" || typeof saveAs !== "function") {
+      throw new Error("未能載入 Word 函式庫，請檢查網絡後再試");
+    }
     const { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun, ImageRun, WidthType, PageBreak, BorderStyle, VerticalAlign } = docx;
     const thin = { style: BorderStyle.SINGLE, size: 4, color: "000000" };
     const borders = { top: thin, bottom: thin, left: thin, right: thin };
